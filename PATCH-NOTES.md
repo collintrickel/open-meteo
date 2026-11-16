@@ -47,6 +47,7 @@ with their pressure level; JSON and CSV carry the full names.
 - `Sources/App/Gfs/GfsVariableDownloadable.swift`: GRIB index names (hourly and 15-minute), `CLMR` / `CIMIXR`, kg/kg to g/kg, `convertGfsCloudHeightToAboveGround`.
 - `Sources/App/Gfs/GfsDownload.swift`: the above-ground conversion in the hourly and 15-minute loops.
 - `Sources/App/Controllers/VariableHourly.swift`, `Sources/App/Helper/FlatBufferWriter/FlatBuffers+WeatherApi.swift`: the two API pressure names.
+- `Sources/App/Controllers/VariableHourly.swift` `pressureLevelInput`: the two names join the `vertical_velocity` group (`return raw()`), keeping that switch exhaustive; no interpolation between levels.
 
 ## Behaviour not changed
 

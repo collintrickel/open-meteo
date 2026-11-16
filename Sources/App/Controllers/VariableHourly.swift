@@ -931,7 +931,8 @@ struct VariableHourlyDeriver<Reader: GenericReaderProtocol>: GenericDeriverProto
              .winddirection, .wind_direction,
              .dewpoint, .dew_point,
              .cloudcover, .cloud_cover,
-             .vertical_velocity:
+             .vertical_velocity,
+             .cloud_water_mixing_ratio, .cloud_ice_mixing_ratio:
             return raw()
         }
 

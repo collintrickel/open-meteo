@@ -31,6 +31,8 @@ enum HrrrSurfaceVariable: String, CaseIterable, GfsSurfaceVariableMetadataBacked
     case shortwave_radiation, diffuse_radiation, cape, visibility
     case boundary_layer_height, total_column_integrated_water_vapour
     case mass_density_8m
+    /// IIG patch (PATCH-NOTES.md)
+    case cloud_base, cloud_top, cloud_ceiling
 
 }
 
@@ -42,6 +44,8 @@ enum Hrrr15MinSurfaceVariable: String, CaseIterable, GfsSurfaceVariableMetadataB
     case wind_v_component_80m, wind_u_component_80m
     case shortwave_radiation, diffuse_radiation, visibility
     case snowfall_water_equivalent
+    /// IIG patch (PATCH-NOTES.md)
+    case cloud_base, cloud_top, cloud_ceiling
 
 }
 

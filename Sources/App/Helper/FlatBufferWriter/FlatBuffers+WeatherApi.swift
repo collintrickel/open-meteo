@@ -743,6 +743,9 @@ extension ForecastPressureVariable: FlatBuffersVariable {
             return .init(variable: .windUComponent, pressureLevel: Int16(level))
         case .wind_v_component:
             return .init(variable: .windVComponent, pressureLevel: Int16(level))
+        case .cloud_water_mixing_ratio, .cloud_ice_mixing_ratio:
+            // IIG patch: the SDK (1.30.0) has no mixing-ratio variable; JSON and CSV name them in full
+            return .init(variable: .undefined, pressureLevel: Int16(level))
         }
     }
 }

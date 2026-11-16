@@ -224,10 +224,15 @@ enum HrrrDownloadSurfaceVariable: String, CaseIterable, GfsSurfaceVariableDownlo
     case shortwave_radiation, diffuse_radiation, cape, visibility
     case boundary_layer_height, total_column_integrated_water_vapour
     case mass_density_8m
+    /// IIG patch (PATCH-NOTES.md): in wrfprs as in wrfsfc
+    case cloud_base, cloud_top, cloud_ceiling
 
 
     func gribIndexName(timestep: Int?) -> String? {
         switch self {
+        case .cloud_base: return ":HGT:cloud base:"
+        case .cloud_top: return ":HGT:cloud top:"
+        case .cloud_ceiling: return ":HGT:cloud ceiling:"
         case .pressure_msl: return ":MSLMA:mean sea level:"
         case .lifted_index: return ":LFTX:500-1000 mb:"
         case .temperature_2m: return ":TMP:2 m above ground:"
@@ -281,6 +286,8 @@ enum Hrrr15MinDownloadSurfaceVariable: String, CaseIterable, GfsSurfaceVariableD
     case wind_v_component_10m, wind_u_component_10m
     case wind_v_component_80m, wind_u_component_80m
     case shortwave_radiation, diffuse_radiation, visibility
+    /// IIG patch (PATCH-NOTES.md): wrfsubh, instantaneous at each 15 minutes
+    case cloud_base, cloud_top, cloud_ceiling
 
 
     func gribIndexName(timestep: Int?) -> String? {
@@ -288,6 +295,9 @@ enum Hrrr15MinDownloadSurfaceVariable: String, CaseIterable, GfsSurfaceVariableD
         let average = timestep == 0 ? "anl" : "\(timestep - 15)-\(timestep) min ave fcst"
         let forecast = timestep == 0 ? "anl" : "\(timestep) min fcst"
         switch self {
+        case .cloud_base: return ":HGT:cloud base:\(forecast):"
+        case .cloud_top: return ":HGT:cloud top:\(forecast):"
+        case .cloud_ceiling: return ":HGT:cloud ceiling:\(forecast):"
         case .temperature_2m: return ":TMP:2 m above ground:\(forecast):"
         case .precipitation: return ":PRATE:surface:\(forecast):"
         case .frozen_precipitation_percent: return ":CPOFP:surface:\(forecast):"
@@ -437,6 +447,28 @@ private func pressureGribIndexName(_ field: GfsPressureField, verticalVelocityNa
     case .cloud_cover: return ":TCDC:\(field.level) mb:"
     case .relative_humidity: return ":RH:\(field.level) mb:"
     case .vertical_velocity: return ":\(verticalVelocityName):\(field.level) mb:"
+    case .cloud_water_mixing_ratio: return ":CLMR:\(field.level) mb:"
+    case .cloud_ice_mixing_ratio: return ":CIMIXR:\(field.level) mb:"
+    }
+}
+
+extension GfsSurfaceField {
+    /// IIG patch (PATCH-NOTES.md): HRRR cloud heights, converted to metres above ground on download
+    var isCloudHeight: Bool {
+        switch self {
+        case .cloud_base, .cloud_top, .cloud_ceiling: return true
+        default: return false
+        }
+    }
+}
+
+/// IIG patch (PATCH-NOTES.md): the same conversion as `convertCloudHeightToAboveGround` in
+/// NcepRrfsVariableDownloadable.swift. GRIB heights are metres above sea level; subtract model terrain
+/// (sea, stored as -999, counts as 0) and clamp at 0. NaN (no cloud: the GRIB bitmap) stays NaN.
+func convertGfsCloudHeightToAboveGround(data: inout [Float], elevation: [Float]) {
+    for i in data.indices {
+        let terrain = elevation[i] == -999 ? 0 : elevation[i]
+        data[i] = data[i].isNaN || data[i] <= -99999 || terrain.isNaN ? .nan : max(data[i] - terrain, 0)
     }
 }
 
@@ -460,5 +492,12 @@ extension GfsPressureVariable: GfsVariableDownloadable where Schema: GfsPressure
     var downloadField: GfsDownloadField { .pressure(.init(variable: variable, level: level)) }
     func gribIndexName(timestep: Int?) -> String? { pressureGribIndexName(.init(variable: variable, level: level), verticalVelocityName: Schema.verticalVelocityGribName) }
     var skipHour0: Bool { false }
-    func multiplyAdd(dtSeconds: Int) -> (multiply: Float, add: Float)? { variable == .temperature ? (1, -273.15) : nil }
+    func multiplyAdd(dtSeconds: Int) -> (multiply: Float, add: Float)? {
+        switch variable {
+        case .temperature: return (1, -273.15)
+        // IIG patch: kg/kg to g/kg
+        case .cloud_water_mixing_ratio, .cloud_ice_mixing_ratio: return (1000, 0)
+        default: return nil
+        }
+    }
 }

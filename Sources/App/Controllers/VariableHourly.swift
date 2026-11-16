@@ -480,6 +480,9 @@ enum ForecastPressureVariableType: String, GenericVariableMixable {
     case cloudcover
     case cloud_cover
     case vertical_velocity
+    /// IIG patch (PATCH-NOTES.md): served straight from stored HRRR fields of the same name
+    case cloud_water_mixing_ratio
+    case cloud_ice_mixing_ratio
 
     /// Normalize compatibility aliases after first giving readers a chance to serve the exact requested name.
     var remapped: Self {

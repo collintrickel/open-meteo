@@ -133,6 +133,12 @@ enum GfsSurfaceField: String, Sendable, Hashable {
 
     case mass_density_8m
 
+    /// IIG patch (PATCH-NOTES.md): HRRR `HGT:cloud base`, `HGT:cloud top`, `HGT:cloud ceiling`.
+    /// Stored in metres above ground like RRFS; NaN where the GRIB bitmap has no cloud.
+    case cloud_base
+    case cloud_top
+    case cloud_ceiling
+
     var metadata: GfsVariableMetadata {
         switch self {
         case .temperature_2m:
@@ -188,6 +194,9 @@ enum GfsSurfaceField: String, Sendable, Hashable {
             return .init(scalefactor: 10, interpolation: .hermite(bounds: nil), unit: .kilogramPerSquareMetre)
         case .mass_density_8m:
             return .init(scalefactor: 0.1, interpolation: .linear, unit: .microgramsPerCubicMetre)
+        case .cloud_base, .cloud_top, .cloud_ceiling:
+            // Same as NcepRrfsSurfaceVariable cloud heights
+            return .init(scalefactor: 0.1, interpolation: .linear, unit: .metre)
         }
     }
 }
@@ -203,6 +212,9 @@ enum GfsPressureVariableType: String, CaseIterable, RawRepresentableString {
     case cloud_cover
     case relative_humidity
     case vertical_velocity
+    /// IIG patch (PATCH-NOTES.md): HRRR `CLMR` and `CIMIXR` from wrfprs, stored in g/kg. HRRR only.
+    case cloud_water_mixing_ratio
+    case cloud_ice_mixing_ratio
 }
 
 /// Semantic identity of a pressure-level field, independent of domain availability.
@@ -277,6 +289,9 @@ struct GfsPressureVariable<Schema: GfsPressureVariableSchema>: GenericVariable {
             return (0.2..<1).interpolated(atFraction: (0..<800).fraction(of: Float(level)))
         case .vertical_velocity:
             return (20..<100).interpolated(atFraction: (0..<500).fraction(of: Float(level)))
+        case .cloud_water_mixing_ratio, .cloud_ice_mixing_ratio:
+            // g/kg to 0.001 g/kg (GRIB precision is 1e-5 kg/kg = 0.01 g/kg)
+            return 1000
         }
     }
 
@@ -296,6 +311,8 @@ struct GfsPressureVariable<Schema: GfsPressureVariableSchema>: GenericVariable {
             return .hermite(bounds: 0...100)
         case .vertical_velocity:
             return .hermite(bounds: nil)
+        case .cloud_water_mixing_ratio, .cloud_ice_mixing_ratio:
+            return .linear
         }
     }
 
@@ -315,6 +332,8 @@ struct GfsPressureVariable<Schema: GfsPressureVariableSchema>: GenericVariable {
             return .percentage
         case .vertical_velocity:
             return .metrePerSecondNotUnitConverted
+        case .cloud_water_mixing_ratio, .cloud_ice_mixing_ratio:
+            return .gramPerKilogram
         }
     }
 
@@ -325,7 +344,8 @@ struct GfsPressureVariable<Schema: GfsPressureVariableSchema>: GenericVariable {
 
 enum Gfs025PressureVariableSchema: GfsPressureVariableSchema {
     static let levels = [10, 15, 20, 30, 40, 50, 70, 100, 125, 150, 175, 200, 225, 250, 275, 300, 325, 350, 375, 400, 425, 450, 475, 500, 525, 550, 575, 600, 625, 650, 675, 700, 725, 750, 775, 800, 825, 850, 875, 900, 925, 950, 975, 1000]
-    static let variableTypes = GfsPressureVariableType.allCases
+    // IIG patch: listed instead of `allCases`, so the HRRR-only cloud mixing ratios stay out of GFS
+    static let variableTypes: [GfsPressureVariableType] = [.temperature, .wind_u_component, .wind_v_component, .geopotential_height, .cloud_cover, .relative_humidity, .vertical_velocity]
 
     static func supports(variable: GfsPressureVariableType, level: Int) -> Bool {
         guard levels.contains(level), variableTypes.contains(variable) else {
@@ -337,7 +357,23 @@ enum Gfs025PressureVariableSchema: GfsPressureVariableSchema {
 
 enum HrrrPressureVariableSchema: GfsPressureVariableSchema {
     static let levels = [50, 75, 100, 125, 150, 175, 200, 225, 250, 275, 300, 325, 350, 375, 400, 425, 450, 475, 500, 525, 550, 575, 600, 625, 650, 675, 700, 725, 750, 775, 800, 825, 850, 875, 900, 925, 950, 975, 1000]
-    static let variableTypes: [GfsPressureVariableType] = [.temperature, .wind_u_component, .wind_v_component, .geopotential_height, .relative_humidity, .vertical_velocity]
+    static let variableTypes: [GfsPressureVariableType] = [.temperature, .wind_u_component, .wind_v_component, .geopotential_height, .relative_humidity, .vertical_velocity, .cloud_water_mixing_ratio, .cloud_ice_mixing_ratio]
+
+    /// IIG patch: cloud water and ice only every 25 hPa from 1000 to 400 hPa, plus 300 hPa
+    /// (covers all of the IIG app's PRESSURE_LEVELS).
+    static let cloudMixingRatioLevels: [Int] = Array(stride(from: 400, through: 1000, by: 25)) + [300]
+
+    static func supports(variable: GfsPressureVariableType, level: Int) -> Bool {
+        guard levels.contains(level), variableTypes.contains(variable) else {
+            return false
+        }
+        switch variable {
+        case .cloud_water_mixing_ratio, .cloud_ice_mixing_ratio:
+            return cloudMixingRatioLevels.contains(level)
+        default:
+            return true
+        }
+    }
 }
 
 enum Gefs05PressureVariableSchema: GfsPressureVariableSchema {

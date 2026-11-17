@@ -58,7 +58,8 @@ job runs `--max-forecast-hour 18` every hour, a second job runs `--run <cycle> -
 - `--convert-lock <path>`: an exclusive `flock` (blocking; logged `convert-lock: waiting for <path>` and
   `convert-lock: acquired after N s`, then `released`) around `GenericVariableHandle.convert` and the tail's
   meta.json check. Downloading (GRIB fetch, decoding, the per-hour spatial temp files) stays outside it. Released on
-  return or error; the kernel releases it if the process dies. Works across containers on the same bind mount.
+  return or error; the kernel releases it if the process dies. Works across containers on the same bind mount. The
+  file is opened read-only (created if missing), so it may belong to another user.
 - `convert` was checked as the only step writing the domain's shared files: time-series chunks and previous-day
   chunks (`OmFileSplitter.updateFromTimeOrientedStreaming3D`), `static/meta.json`, full-run files. Two other
   writes happen during download: the static **elevation file** (`static/HSURF.om`, `downloadNcepElevation`), written

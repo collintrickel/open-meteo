@@ -20,7 +20,9 @@ func withConvertLock<T>(path: String?, logger: Logger, what: String, _ body: () 
     guard let path else {
         return try await body()
     }
-    let fd = open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0o644)
+    // Read-only: flock needs no write access, and the file may belong to another user (Is It Good?: root makes it on
+    // the host, the container runs as openmeteo)
+    let fd = open(path, O_RDONLY | O_CREAT | O_CLOEXEC, 0o644)
     guard fd >= 0 else {
         throw ConvertLockError.open(path: path, errno: errno)
     }

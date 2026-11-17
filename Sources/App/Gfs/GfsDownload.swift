@@ -33,6 +33,14 @@ struct GfsDownload: AsyncCommand {
         @Option(name: "max-forecast-hour", help: "Only download data until this forecast hour")
         var maxForecastHour: Int?
 
+        /// IIG patch (PATCH-NOTES.md): a run's tail, e.g. HRRR 19-48 h beside an hourly job to 18 h
+        @Option(name: "min-forecast-hour", help: "Only download data from this forecast hour on. Above 0: a tail run, which writes no meta.json and no full-run files, and leaves out hours a newer run already wrote")
+        var minForecastHour: Int?
+
+        /// IIG patch (PATCH-NOTES.md): serialize writes into the domain between concurrent downloads
+        @Option(name: "convert-lock", help: "Hold an exclusive flock on this file while writing into the domain (convert, and a missing elevation file); downloading stays outside it")
+        var convertLock: String?
+
         @Option(name: "timeinterval", short: "t", help: "Timeinterval to download past forecasts. Format 20220101-20220131")
         var timeinterval: String?
 
@@ -87,6 +95,11 @@ struct GfsDownload: AsyncCommand {
         if signature.onlyVariables != nil && signature.upperLevel {
             fatalError("Parameter 'onlyVariables' and 'upperLevel' must not be used simultaneously")
         }
+        if let min = signature.minForecastHour, min < 0 || min > (signature.maxForecastHour ?? Int.max) {
+            fatalError("Parameter 'min-forecast-hour' must be 0 or more and not above 'max-forecast-hour'")
+        }
+        /// IIG patch (PATCH-NOTES.md): a run's tail (from hour > 0) must not touch what the run's head owns
+        let isTail = (signature.minForecastHour ?? 0) > 0
 
         let generateFullRun = !signature.secondFlush && domain.countEnsembleMember == 1
 
@@ -119,15 +132,30 @@ struct GfsDownload: AsyncCommand {
             }
             let writeUpdateJson = !isPressureOnlyEnsembleDownload
 
-            let handles = try await downloadGfs(application: context.application, domain: domain, run: run, variables: variables, secondFlush: signature.secondFlush, maxForecastHour: signature.maxForecastHour, skipMissing: signature.skipMissing, downloadFromAws: signature.downloadFromAws, uploadQueues: uploadQueues)
+            let handles = try await downloadGfs(application: context.application, domain: domain, run: run, variables: variables, secondFlush: signature.secondFlush, minForecastHour: signature.minForecastHour, maxForecastHour: signature.maxForecastHour, skipMissing: signature.skipMissing, downloadFromAws: signature.downloadFromAws, uploadQueues: uploadQueues, convertLock: signature.convertLock)
 
             let nConcurrent = signature.concurrent ?? 4
-            try await GenericVariableHandle.convert(application: context.application, domain: domain, createNetcdf: signature.createNetcdf, run: run, handles: handles, concurrent: nConcurrent, writeUpdateJson: writeUpdateJson, uploadQueues: uploadQueues, generateFullRun: generateFullRun)
+            // IIG patch (PATCH-NOTES.md): every write into the domain under the convert lock
+            try await withConvertLock(path: signature.convertLock, logger: logger, what: "convert \(domain.rawValue) run \(run.iso8601_YYYY_MM_dd_HH_mm)") {
+                let toConvert = isTail ? dropHoursWrittenByNewerRun(domain: domain, run: run, handles: handles, logger: logger) : handles
+                guard !toConvert.isEmpty else {
+                    logger.info("Nothing left to convert")
+                    return
+                }
+                try await GenericVariableHandle.convert(application: context.application, domain: domain, createNetcdf: signature.createNetcdf, run: run, handles: toConvert, concurrent: nConcurrent, writeUpdateJson: writeUpdateJson && !isTail, uploadQueues: uploadQueues, generateFullRun: generateFullRun && !isTail)
+            }
         case .gfswave025, .gfswave025_ens, .gfswave016:
             let variables: [any GfsVariableDownloadable] = GfsWaveVariable.allCases
-            let handles = try await downloadGfs(application: context.application, domain: domain, run: run, variables: variables, secondFlush: signature.secondFlush, maxForecastHour: signature.maxForecastHour, skipMissing: signature.skipMissing, downloadFromAws: signature.downloadFromAws, uploadQueues: uploadQueues)
+            let handles = try await downloadGfs(application: context.application, domain: domain, run: run, variables: variables, secondFlush: signature.secondFlush, minForecastHour: signature.minForecastHour, maxForecastHour: signature.maxForecastHour, skipMissing: signature.skipMissing, downloadFromAws: signature.downloadFromAws, uploadQueues: uploadQueues, convertLock: signature.convertLock)
             let nConcurrent = signature.concurrent ?? 1
-            try await GenericVariableHandle.convert(application: context.application, domain: domain, createNetcdf: signature.createNetcdf, run: run, handles: handles, concurrent: nConcurrent, writeUpdateJson: true, uploadQueues: uploadQueues, generateFullRun: generateFullRun, generateTimeSeries: !signature.skipTimeseries)
+            try await withConvertLock(path: signature.convertLock, logger: logger, what: "convert \(domain.rawValue) run \(run.iso8601_YYYY_MM_dd_HH_mm)") {
+                let toConvert = isTail ? dropHoursWrittenByNewerRun(domain: domain, run: run, handles: handles, logger: logger) : handles
+                guard !toConvert.isEmpty else {
+                    logger.info("Nothing left to convert")
+                    return
+                }
+                try await GenericVariableHandle.convert(application: context.application, domain: domain, createNetcdf: signature.createNetcdf, run: run, handles: toConvert, concurrent: nConcurrent, writeUpdateJson: !isTail, uploadQueues: uploadQueues, generateFullRun: generateFullRun && !isTail, generateTimeSeries: !signature.skipTimeseries)
+            }
         case .gefs025_ensemble_mean, .gefs05_ensemble_mean, .gefswave025_ensemble_mean:
             fatalError("Ensemble mean domains cannot be downloaded directly")
         }
@@ -220,14 +248,22 @@ struct GfsDownload: AsyncCommand {
     }
 
     /// download GFS025 and NAM CONUS
-    func downloadGfs(application: Application, domain: GfsDomain, run: Timestamp, variables: [any GfsVariableDownloadable], secondFlush: Bool, maxForecastHour: Int?, skipMissing: Bool, downloadFromAws: Bool, uploadQueues: [S3UploadQueue]) async throws -> [GenericVariableHandle] {
+    func downloadGfs(application: Application, domain: GfsDomain, run: Timestamp, variables: [any GfsVariableDownloadable], secondFlush: Bool, minForecastHour: Int? = nil, maxForecastHour: Int?, skipMissing: Bool, downloadFromAws: Bool, uploadQueues: [S3UploadQueue], convertLock: String? = nil) async throws -> [GenericVariableHandle] {
         let logger = application.logger
 
         // GFS025 ensemble does not have elevation information, use non-ensemble version
         let elevationUrl = (domain == .gfs025_ens ? GfsDomain.gfs025 : domain).getGribUrl(run: run, forecastHour: 0, member: 0, useAws: downloadFromAws)
         if ![GfsDomain.hrrr_conus_15min, .gfswave025, .gfswave025_ens, .gfswave016].contains(domain) {
             // 15min hrrr data uses hrrr domain elevation files
-            try await downloadNcepElevation(application: application, url: elevationUrl, surfaceElevationFileOm: domain.surfaceElevationFileOm, grid: domain.grid, isGlobal: domain.isGlobal, uploadQueues: uploadQueues)
+            // IIG patch (PATCH-NOTES.md): the static elevation file is shared; written (once, when missing) under the
+            // convert lock, so two downloads starting together never write it at once (it checks again inside)
+            if FileManager.default.fileExists(atPath: domain.surfaceElevationFileOm.getFilePath()) {
+                try await downloadNcepElevation(application: application, url: elevationUrl, surfaceElevationFileOm: domain.surfaceElevationFileOm, grid: domain.grid, isGlobal: domain.isGlobal, uploadQueues: uploadQueues)
+            } else {
+                try await withConvertLock(path: convertLock, logger: logger, what: "elevation file \(domain.rawValue)") {
+                    try await downloadNcepElevation(application: application, url: elevationUrl, surfaceElevationFileOm: domain.surfaceElevationFileOm, grid: domain.grid, isGlobal: domain.isGlobal, uploadQueues: uploadQueues)
+                }
+            }
         }
 
         let deadLineHours: Double
@@ -270,7 +306,8 @@ struct GfsDownload: AsyncCommand {
 
         // Download HRRR 15 minutes data
         if domain == .hrrr_conus_15min {
-            let handles = try await (0...(maxForecastHour ?? 18)).asyncFlatMap { forecastHour in
+            // IIG patch (PATCH-NOTES.md): --min-forecast-hour as well as --max-forecast-hour
+            let handles = try await ((minForecastHour ?? 0)...(maxForecastHour ?? 18)).asyncFlatMap { forecastHour in
                 logger.info("Downloading forecastHour \(forecastHour)")
 
                 /// Keep variables in memory. Precip + Frozen percent to calculate snowfall
@@ -360,13 +397,18 @@ struct GfsDownload: AsyncCommand {
         if let maxForecastHour {
             forecastHours = forecastHours.filter({ $0 <= maxForecastHour })
         }
+        // IIG patch (PATCH-NOTES.md): a run's tail
+        if let minForecastHour {
+            forecastHours = forecastHours.filter({ $0 >= minForecastHour })
+        }
         let timestamps = forecastHours.map { run.add(hours: $0) }
         
         let handles = try await timestamps.enumerated().asyncFlatMap { (i,timestamp) in
             let forecastHour = (timestamp.timeIntervalSince1970 - run.timeIntervalSince1970) / 3600
             let previousHour = (timestamps[max(0, i-1)].timeIntervalSince1970 - run.timeIntervalSince1970) / 3600
             /// Delta time seconds considering irregular timesteps
-            let dtSeconds = previousHour == 0 ? domain.dtSeconds : ((forecastHour - previousHour) * 3600)
+            // IIG patch (PATCH-NOTES.md): i == 0 too, so a tail's first hour (previous = itself) isn't 0 s long
+            let dtSeconds = (i == 0 || previousHour == 0) ? domain.dtSeconds : ((forecastHour - previousHour) * 3600)
             logger.info("Downloading forecastHour \(forecastHour)")
 
             let storePrecipMembers = VariablePerMemberStorage<GfsSurfaceField>()

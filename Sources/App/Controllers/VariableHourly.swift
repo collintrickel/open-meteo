@@ -683,6 +683,8 @@ private struct VariableHourlyDerivationCompatibility {
     let estimatesDiffuseRadiationFromShortwave: Bool
     let derivesCloudLayersFromPressureHumidity: Bool
     let swapUVComponents: Bool
+    /// IIG patch (PATCH-NOTES.md): cloud_base / cloud_top / cloud_ceiling store "no cloud" as `CloudHeight.noValue`
+    let storesCloudHeightNoValue: Bool
 
     private init(
         aliasesSoilTemperature0To10cmTo0To7cm: Bool = false,
@@ -697,7 +699,8 @@ private struct VariableHourlyDerivationCompatibility {
         reversesWaveDirections: Bool = false,
         estimatesDiffuseRadiationFromShortwave: Bool = false,
         derivesCloudLayersFromPressureHumidity: Bool = false,
-        swapUVComponents: Bool = false
+        swapUVComponents: Bool = false,
+        storesCloudHeightNoValue: Bool = false
     ) {
         self.aliasesSoilTemperature0To10cmTo0To7cm = aliasesSoilTemperature0To10cmTo0To7cm
         self.supportsEra5SoilMoistureIndices = supportsEra5SoilMoistureIndices
@@ -712,16 +715,19 @@ private struct VariableHourlyDerivationCompatibility {
         self.estimatesDiffuseRadiationFromShortwave = estimatesDiffuseRadiationFromShortwave
         self.derivesCloudLayersFromPressureHumidity = derivesCloudLayersFromPressureHumidity
         self.swapUVComponents = swapUVComponents
+        self.storesCloudHeightNoValue = storesCloudHeightNoValue
     }
 
     private static func gfs(
         convectivePrecipitation: ConvectivePrecipitation = .storedShowers,
-        swapUVComponents: Bool = false
+        swapUVComponents: Bool = false,
+        storesCloudHeightNoValue: Bool = false
     ) -> Self {
         return .init(
             convectivePrecipitation: convectivePrecipitation,
             allowsSoilDepthCompatibilityAliases: false,
-            swapUVComponents: swapUVComponents
+            swapUVComponents: swapUVComponents,
+            storesCloudHeightNoValue: storesCloudHeightNoValue
         )
     }
 
@@ -773,9 +779,12 @@ private struct VariableHourlyDerivationCompatibility {
              .ncep_gefs05_ensemble_mean:
             self = .gfs(convectivePrecipitation: .zeroWherePrecipitationIsAvailable)
         case .ncep_hrrr_conus:
-            self = .gfs(convectivePrecipitation: .zeroWherePrecipitationIsAvailable)
+            self = .gfs(convectivePrecipitation: .zeroWherePrecipitationIsAvailable, storesCloudHeightNoValue: true)
         case .ncep_hrrr_conus_15min:
-            self = .gfs(convectivePrecipitation: .zeroWherePrecipitationIsAvailable)
+            self = .gfs(convectivePrecipitation: .zeroWherePrecipitationIsAvailable, storesCloudHeightNoValue: true)
+        case .ncep_rrfs_conus, .ncep_rrfs_conus_15min, .ncep_rrfs_north_america:
+            // IIG patch (PATCH-NOTES.md); otherwise as `default`
+            self = .init(storesCloudHeightNoValue: true)
         case .ncep_nbm_conus:
             self = .init(
                 convectivePrecipitation: .zeroWherePrecipitationIsAvailable,
@@ -1090,6 +1099,19 @@ struct VariableHourlyDeriver<Reader: GenericReaderProtocol>: GenericDeriverProto
         }
 
         let rawVariable = Reader.variableFromString(variable.rawValue)
+
+        // IIG patch (PATCH-NOTES.md): stored "no cloud" (`CloudHeight.noValue`) to null. Here, after the HRRR hourly
+        // and 15-minute domains are mixed, so a 15-minute "no cloud" is never filled from the hourly domain.
+        if compatibility.storesCloudHeightNoValue, let rawVariable {
+            switch variable {
+            case .cloud_base, .cloud_top, .cloud_ceiling:
+                return .one(.raw(rawVariable)) { height, _ in
+                    return DataAndUnit(CloudHeight.toNull(height.data), height.unit)
+                }
+            default:
+                break
+            }
+        }
 
         if variable == .diffuse_radiation, compatibility.estimatesDiffuseRadiationFromShortwave {
             guard let shortwave = shortwaveRadiationInput() else { return nil }

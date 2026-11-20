@@ -577,8 +577,9 @@ import OpenMeteoSdk
         var heights: [Float] = [1500, 300, 50, .nan, -99999, 1000]
         NcepRrfsSurfaceVariable.cloud_base.convertCloudHeightToAboveGround(
             data: &heights, elevation: [500, -999, 100, 0, 0, .nan])
-        #expect(Array(heights.prefix(3)) == [1000, 300, 0])
-        #expect(heights.suffix(3).allSatisfy { $0.isNaN })
+        // IIG patch (PATCH-NOTES.md): no value (NaN) and fills are stored as CloudHeight.noValue; unknown terrain NaN
+        #expect(Array(heights.prefix(5)) == [1000, 300, 0, CloudHeight.noValue, CloudHeight.noValue])
+        #expect(heights[5].isNaN)
         var snowpack: [Float] = [0, 25.5, 100]
         NcepRrfsSurfaceVariable.snow_depth_water_equivalent.convertUnits(data: &snowpack)
         #expect(snowpack == [0, 25.5, 100])

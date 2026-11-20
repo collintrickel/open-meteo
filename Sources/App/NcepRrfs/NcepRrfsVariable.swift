@@ -233,7 +233,9 @@ enum NcepRrfsSurfaceVariable: String, CaseIterable, GenericVariable {
         case .pm2_5, .pm10: return .backwards
         case .pm2_5_total_organic_matter: return .linear
         case .radar_reflectivity: return .linear
-        case .snow_depth_water_equivalent, .cloud_base, .cloud_ceiling, .cloud_top: return .linear
+        case .snow_depth_water_equivalent: return .linear
+        // IIG patch (PATCH-NOTES.md): "no cloud" is `CloudHeight.noValue`, never blended
+        case .cloud_base, .cloud_ceiling, .cloud_top: return .linearCloudHeight
         case .temperature_2m, .pressure_msl, .surface_temperature,
              .total_column_integrated_water_vapour, .sensible_heat_flux, .latent_heat_flux,
              .lifted_index, .temperature_30m, .temperature_50m,
@@ -380,7 +382,8 @@ enum NcepRrfs15MinVariable: String, CaseIterable, GenericVariable {
     var interpolation: ReaderInterpolation {
         switch self {
         case .radar_reflectivity: return .linear
-        case .cloud_base, .cloud_ceiling, .cloud_top: return .linear
+        // IIG patch (PATCH-NOTES.md): "no cloud" is `CloudHeight.noValue`, never blended
+        case .cloud_base, .cloud_ceiling, .cloud_top: return .linearCloudHeight
         case .temperature_2m, .pressure_msl:
             return .hermite(bounds: nil)
         case .relative_humidity_2m:

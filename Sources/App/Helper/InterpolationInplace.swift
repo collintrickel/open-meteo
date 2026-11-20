@@ -48,6 +48,42 @@ extension Array where Element == Float {
             interpolateInplaceBackwards(nTime: time.count, isSummation: true)
         case .backwards, .backwards_max:
             interpolateInplaceBackwards(nTime: time.count, isSummation: false)
+        case .linearCloudHeight:
+            interpolateInplaceLinearCloudHeight(nTime: time.count)
+        }
+    }
+
+    /// IIG patch (PATCH-NOTES.md): as `interpolateInplaceLinear` (fills NaN gaps between two values), but a gap next
+    /// to `CloudHeight.noValue` takes the nearer side, never a blend (`CloudHeight.interpolate`)
+    mutating func interpolateInplaceLinearCloudHeight(nTime: Int) {
+        precondition(nTime <= self.count)
+        precondition(self.count % nTime == 0)
+        let nLocations = self.count / nTime
+        for l in 0..<nLocations {
+            /// Previous value that was not NaN
+            var previousValue = Float.nan
+            var previousIndex = 0
+            for t in 0..<nTime {
+                guard self[l * nTime + t].isNaN else {
+                    previousValue = self[l * nTime + t]
+                    previousIndex = t
+                    continue
+                }
+                // Seek next valid value
+                for t2 in t..<nTime {
+                    let value = self[l * nTime + t2]
+                    guard !value.isNaN else {
+                        continue
+                    }
+                    // Fill up all values until the first valid value
+                    for t in t..<t2 {
+                        /// Calculate fraction from 0-1 for linear interpolation
+                        let fraction = Float(t - previousIndex) / Float(t2 - previousIndex)
+                        self[l * nTime + t] = CloudHeight.interpolate(previousValue, value, fraction: fraction)
+                    }
+                    break
+                }
+            }
         }
     }
 

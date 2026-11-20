@@ -454,21 +454,12 @@ private func pressureGribIndexName(_ field: GfsPressureField, verticalVelocityNa
 
 extension GfsSurfaceField {
     /// IIG patch (PATCH-NOTES.md): HRRR cloud heights, converted to metres above ground on download
+    /// (`CloudHeight.convertToAboveGround`)
     var isCloudHeight: Bool {
         switch self {
         case .cloud_base, .cloud_top, .cloud_ceiling: return true
         default: return false
         }
-    }
-}
-
-/// IIG patch (PATCH-NOTES.md): the same conversion as `convertCloudHeightToAboveGround` in
-/// NcepRrfsVariableDownloadable.swift. GRIB heights are metres above sea level; subtract model terrain
-/// (sea, stored as -999, counts as 0) and clamp at 0. NaN (no cloud: the GRIB bitmap) stays NaN.
-func convertGfsCloudHeightToAboveGround(data: inout [Float], elevation: [Float]) {
-    for i in data.indices {
-        let terrain = elevation[i] == -999 ? 0 : elevation[i]
-        data[i] = data[i].isNaN || data[i] <= -99999 || terrain.isNaN ? .nan : max(data[i] - terrain, 0)
     }
 }
 

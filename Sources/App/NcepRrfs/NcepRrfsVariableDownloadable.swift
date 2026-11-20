@@ -60,12 +60,11 @@ extension NcepRrfsVariableDownloadable {
     var isDewpoint: Bool { false }
     var isFrozenPrecipitationPercent: Bool { false }
 
+    /// IIG patch (PATCH-NOTES.md, "Clear sky and fill values"): RRFS writes "no cloud top" as -5000, which the stock
+    /// check (`<= -99999`) let through and the clamp turned into a top of 0 m. No value and fill values are now
+    /// `CloudHeight.noValue`, as for HRRR.
     func convertCloudHeightToAboveGround(data: inout [Float], elevation: [Float]) {
-        for i in data.indices {
-            let terrain = elevation[i] == -999 ? 0 : elevation[i]
-            // Preserve missing coverage and the upstream no-cloud sentinel.
-            data[i] = data[i].isNaN || data[i] <= -99999 || terrain.isNaN ? .nan : max(data[i] - terrain, 0)
-        }
+        CloudHeight.convertToAboveGround(data: &data, elevation: elevation)
     }
 
     func convertUnits(data: inout [Float]) {

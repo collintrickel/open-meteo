@@ -16,6 +16,21 @@ extension Array where Element == Float {
             return backwardsSum(timeOld: timeOld, timeNew: timeNew, scalefactor: scalefactor)
         case .backwards, .backwards_max:
             return backwards(timeOld: timeOld, timeNew: timeNew, scalefactor: scalefactor)
+        case .linearCloudHeight:
+            return interpolateLinearCloudHeight(timeOld: timeOld, timeNew: timeNew, scalefactor: scalefactor)
+        }
+    }
+
+    /// IIG patch (PATCH-NOTES.md): as `interpolateLinear`, but never blends `CloudHeight.noValue` with a height
+    func interpolateLinearCloudHeight(timeOld timeLow: TimerangeDt, timeNew time: TimerangeDt, scalefactor: Float) -> [Float] {
+        return time.map { t in
+            let index = t.timeIntervalSince1970 / timeLow.dtSeconds - timeLow.range.lowerBound.timeIntervalSince1970 / timeLow.dtSeconds
+            let fraction = Float(t.timeIntervalSince1970 % timeLow.dtSeconds) / Float(timeLow.dtSeconds)
+            let A = self[index]
+            let B = index + 1 >= self.count ? A : self[index + 1]
+            let h = CloudHeight.interpolate(A, B, fraction: fraction)
+            /// adjust it to scalefactor, otherwise interpolated values show more level of detail
+            return roundf(h * scalefactor) / scalefactor
         }
     }
 

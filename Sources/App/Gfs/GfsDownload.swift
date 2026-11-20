@@ -335,7 +335,7 @@ struct GfsDownload: AsyncCommand {
                     }
                     // IIG patch (PATCH-NOTES.md): cloud heights to metres above ground, as RRFS
                     if case .surface(let surface) = variable.variable.downloadField, surface.isCloudHeight {
-                        convertGfsCloudHeightToAboveGround(data: &grib2d.array.data, elevation: domainElevation)
+                        CloudHeight.convertToAboveGround(data: &grib2d.array.data, elevation: domainElevation)
                     }
 
                     if case .surface(let surface) = variable.variable.downloadField {
@@ -504,7 +504,7 @@ struct GfsDownload: AsyncCommand {
                     }
                     // IIG patch (PATCH-NOTES.md): cloud heights to metres above ground, as RRFS
                     if case .surface(let surface) = variable.variable.downloadField, surface.isCloudHeight {
-                        convertGfsCloudHeightToAboveGround(data: &grib2d.array.data, elevation: domainElevation)
+                        CloudHeight.convertToAboveGround(data: &grib2d.array.data, elevation: domainElevation)
                     }
                     
                     if case .surface(let surface) = variable.variable.downloadField {

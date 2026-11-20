@@ -134,7 +134,7 @@ enum GfsSurfaceField: String, Sendable, Hashable {
     case mass_density_8m
 
     /// IIG patch (PATCH-NOTES.md): HRRR `HGT:cloud base`, `HGT:cloud top`, `HGT:cloud ceiling`.
-    /// Stored in metres above ground like RRFS; NaN where the GRIB bitmap has no cloud.
+    /// Stored in metres above ground like RRFS; `CloudHeight.noValue` where the GRIB bitmap has no value.
     case cloud_base
     case cloud_top
     case cloud_ceiling
@@ -195,8 +195,8 @@ enum GfsSurfaceField: String, Sendable, Hashable {
         case .mass_density_8m:
             return .init(scalefactor: 0.1, interpolation: .linear, unit: .microgramsPerCubicMetre)
         case .cloud_base, .cloud_top, .cloud_ceiling:
-            // Same as NcepRrfsSurfaceVariable cloud heights
-            return .init(scalefactor: 0.1, interpolation: .linear, unit: .metre)
+            // Same as NcepRrfsSurfaceVariable cloud heights; "no cloud" is `CloudHeight.noValue`, never blended
+            return .init(scalefactor: 0.1, interpolation: .linearCloudHeight, unit: .metre)
         }
     }
 }

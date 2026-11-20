@@ -159,10 +159,14 @@ enum ReaderInterpolation {
     /// Replicate value backwards. E.g. min/max of previous hours
     case backwards
 
+    /// IIG patch (PATCH-NOTES.md): cloud heights. Linear between two heights; next to `CloudHeight.noValue` (no cloud
+    /// in that run) the nearer step, never a blend (`CloudHeight.interpolate`).
+    case linearCloudHeight
+
     /// How many timesteps on the left and right side are used for interpolation
     var padding: Int {
         switch self {
-        case .linear, .linearDegrees:
+        case .linear, .linearDegrees, .linearCloudHeight:
             return 1
         case .hermite:
             return 2
